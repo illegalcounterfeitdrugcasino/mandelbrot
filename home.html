@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ultimate Mandelbrot Explorer</title>
+    <style>
+        :root {
+            --bg-color: #0f1115;
+            --panel-bg: rgba(20, 24, 30, 0.95);
+            --text-color: #e0e6ed;
+            --accent-color: #00d2ff;
+            --accent-hover: #3be0ff;
+            --border-color: #2a3038;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-color);
+            overflow: hidden;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: var(--text-color);
+            /* Prevent standard mobile gestures like pull-to-refresh */
+            overscroll-behavior: none;
+        }
+
+        #app-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        canvas {
+            display: block;
+            /* Prevent browser handling of gestures on canvas */
+            touch-action: none; 
+            background: #000;
+        }
+
+        /* Desktop / Landscape UI - Floating Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 320px;
+            max-height: 90vh;
+            background: var(--panel-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            overflow-y: auto;
+            transition: transform 0.3s ease;
+            z-index: 10;
+        }
+
+        #ui-layer.collapsed {
+            transform: translateX(calc(-100% - 30px));
+        }
+
+        #toggle-ui {
+            position: absolute;
+            top: 20px;
+            left: 350px;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            z-index: 11;
+            transition: left 0.3s ease, background 0.2s;
+        }
+
+        #toggle-ui:hover {
+            background: var(--border-color);
+        }
+
+        #ui-layer.collapsed + #toggle-ui {
+            left: 20px;
+        }
+
+        /* Portrait / Mobile Layout - Split Screen */
+        @media (max-width: 768px) and (orientation: portrait) {
+            #app-container {
+                display: block; /* Use block to manage heights manually in JS or absolute */
+            }
+
+            canvas {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 65%; /* Top 2/3 roughly */
+            }
+
+            #ui-layer {
+                position: absolute;
+                top: auto;
+                bottom: 0;
+                left: 0;
+                width: 100%;
+                height: 35%; /* Bottom 1/3 */
+                max-height: none;
+                border-radius: 16px 16px 0 0;
+                border-left: none;
+                border-right: none;
+                border-bottom: none;
+                box-sizing: border-box;
+                transform: none !important; /* Disable collapse transform */
+            }
+
+            /* Hide the desktop toggle button on mobile */
+            #toggle-ui {
+                display: none;
+            }
+        }
+
+        h1 {
+            font-size: 1.2rem;
+            margin: 0 0 15px 0;
+            color: var(--accent-color);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+
+        .control-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            font-size: 0.85rem;
+            margin-bottom: 5px;
+            color: #aaa;
+        }
+
+        input[type="range"], input[type="number"], select {
+            width: 100%;
+            background: #0a0c10;
+            border: 1px solid var(--border-color);
+            color: white;
+            padding: 8px; /* Larger touch target */
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 16px; /* Prevents iOS auto-zoom on input */
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            background: transparent;
+            padding: 0;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 20px; /* Larger thumb */
+            width: 20px;
+            border-radius: 50%;
+            background: var(--accent-color);
+            cursor: pointer;
+            margin-top: -8px;
+        }
+
+        input[type="range"]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            background: var(--border-color);
+            border-radius: 2px;
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .row > div {
+            flex: 1;
+        }
+
+        button {
+            background: var(--accent-color);
+            color: #000;
+            border: none;
+            padding: 12px; /* Larger touch target */
+            width: 100%;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 10px;
+            font-size: 1rem;
+        }
+
+        button:active {
+            opacity: 0.8;
+        }
+
+        button.secondary {
+            background: transparent;
+            border: 1px solid var(--accent-color);
+            color: var(--accent-color);
+        }
+
+        #status-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+            color: #ccc;
+            font-size: 0.75rem;
+            padding: 8px 10px;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none;
+            user-select: none;
+            box-sizing: border-box;
+            z-index: 5;
+        }
+
+        .stat-item span {
+            color: var(--accent-color);
+        }
+
+        #loader {
+            position: absolute;
+            top: 32%; /* Center in the visual canvas area (approx) */
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.7);
+            padding: 15px 25px;
+            border-radius: 8px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            color: white;
+            font-weight: bold;
+            z-index: 20;
+        }
+        #loader.active { opacity: 1; }
+
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+        <canvas id="canvas"></canvas>
+
+        <div id="status-bar">
+            <div class="stat-item" id="coords-stat">X: 0, Y: 0</div>
+            <div class="stat-item" id="zoom-stat">Zoom: 1x</div>
+            <div class="stat-item" id="time-stat">Time: 0ms</div>
+        </div>
+
+        <div id="loader">Rendering...</div>
+
+        <div id="ui-layer">
+            <h1>Mandelbrot Explorer</h1>
+
+            <div class="control-group">
+                <div class="row">
+                    <div>
+                         <label>Mode</label>
+                        <select id="precision-mode">
+                            <option value="standard">Fast (Float64)</option>
+                            <option value="high">Infinite (BigInt)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Strategy</label>
+                        <select id="render-strategy">
+                            <option value="interlaced">Interlaced</option>
+                            <option value="chunks">Chunks</option>
+                            <option value="scanline">Scanline</option>
+                        </select>
+                    </div>
+                </div>
+               
+            </div>
+
+            <div class="control-group">
+                <div class="row">
+                    <div>
+                        <label>Iterations</label>
+                        <input type="number" id="iterations" value="500" step="100">
+                    </div>
+                     <div>
+                        <label>Palette</label>
+                        <select id="palette">
+                            <option value="electric">Electric</option>
+                            <option value="fire">Fire</option>
+                            <option value="rainbow">Rainbow</option>
+                            <option value="bw">Zebra</option>
+                            <option value="gold">Gold</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Color Density</label>
+                <input type="range" id="color-density" min="0.1" max="10" value="1" step="0.1">
+            </div>
+
+            <div class="control-group">
+                <label>Color Offset (Cycle)</label>
+                <input type="range" id="color-offset" min="0" max="360" value="0">
+            </div>
+
+            <button id="render-btn">Force Re-Render</button>
+            <button id="reset-btn" class="secondary">Reset View</button>
+            
+            <!-- Hidden inputs to keep config valid but save space on mobile -->
+            <div style="display:none;">
+                <input type="number" id="worker-count" value="4">
+                <select id="clear-mode"><option value="black" selected>Black</option></select>
+                <select id="coloring-mode"><option value="smooth" selected>Smooth</option></select>
+            </div>
+            
+            <div style="margin-top:15px; font-size: 0.75rem; color: #666; line-height: 1.4; padding-bottom: 20px;">
+                <strong>Controls:</strong><br>
+                • Pinch to Zoom<br>
+                • Drag to Pan<br>
+            </div>
+        </div>
+
+        <button id="toggle-ui">Hide UI</button>
+    </div>
+
+    <script id="worker-source" type="javascript/worker">
+        const FP_SHIFT = 96n;
+        const FP_ONE = 1n << FP_SHIFT;
+        
+        function toFP(num) {
+            const integerPart = BigInt(Math.floor(num));
+            const fractionalPart = BigInt(Math.floor((num - Math.floor(num)) * Number(FP_ONE)));
+            return (integerPart << FP_SHIFT) + fractionalPart;
+        }
+
+        function mulFP(a, b) {
+            return (a * b) >> FP_SHIFT;
+        }
+
+        function hslToRgb(h, s, l) {
+            let r, g, b;
+            if (s === 0) {
+                r = g = b = l; 
+            } else {
+                const hue2rgb = (p, q, t) => {
+                    if (t < 0) t += 1;
+                    if (t > 1) t -= 1;
+                    if (t < 1/6) return p + (q - p) * 6 * t;
+                    if (t < 1/2) return q;
+                    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                    return p;
+                };
+                const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                const p = 2 * l - q;
+                r = hue2rgb(p, q, h + 1/3);
+                g = hue2rgb(p, q, h);
+                b = hue2rgb(p, q, h - 1/3);
+            }
+            return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+        }
+
+        self.onmessage = function(e) {
+            const data = e.data;
+            const { 
+                jobId, renderId, mode, width, height, 
+                startX, startY, chunkWidth, chunkHeight, 
+                maxIter, palette, colorOffset,
+                coloringMode, colorDensity
+            } = data;
+
+            const buffer = new Uint8ClampedArray(chunkWidth * chunkHeight * 4);
+            let zoomCenterR, zoomCenterI, zoomLevel;
+            let fpZoomCenterR, fpZoomCenterI, fpScale;
+
+            if (mode === 'high') {
+                fpZoomCenterR = BigInt(data.cxStr);
+                fpZoomCenterI = BigInt(data.cyStr);
+                fpScale = BigInt(data.scaleStr);
+            } else {
+                zoomCenterR = data.cx;
+                zoomCenterI = data.cy;
+                zoomLevel = data.scale;
+            }
+
+            const halfW = width / 2;
+            const halfH = height / 2;
+
+            for (let py = 0; py < chunkHeight; py++) {
+                const globalY = startY + py;
+                let cI, fpCI;
+                if (mode === 'high') {
+                    const dy = BigInt(Math.floor(globalY - halfH));
+                    fpCI = fpZoomCenterI + (dy * fpScale);
+                } else {
+                    cI = zoomCenterI + (globalY - halfH) * zoomLevel;
+                }
+
+                for (let px = 0; px < chunkWidth; px++) {
+                    const globalX = startX + px;
+                    let cR, fpCR;
+                    if (mode === 'high') {
+                        const dx = BigInt(Math.floor(globalX - halfW));
+                        fpCR = fpZoomCenterR + (dx * fpScale);
+                    } else {
+                        cR = zoomCenterR + (globalX - halfW) * zoomLevel;
+                    }
+
+                    let iter = 0;
+                    let zr = 0, zi = 0, zr2 = 0, zi2 = 0;
+                    
+                    if (mode === 'high') {
+                        let bzr = 0n, bzi = 0n;
+                        let bzr2 = 0n, bzi2 = 0n;
+                        const FP_FOUR = 4n << FP_SHIFT;
+                        const ESCAPE = FP_FOUR; 
+
+                        while ((bzr2 + bzi2) <= ESCAPE && iter < maxIter) {
+                            bzi = (mulFP(bzr, bzi) << 1n) + fpCI;
+                            bzr = bzr2 - bzi2 + fpCR;
+                            bzr2 = mulFP(bzr, bzr);
+                            bzi2 = mulFP(bzi, bzi);
+                            iter++;
+                        }
+                    } else {
+                        while ((zr2 + zi2) <= 4 && iter < maxIter) {
+                            zi = 2 * zr * zi + cI;
+                            zr = zr2 - zi2 + cR;
+                            zr2 = zr * zr;
+                            zi2 = zi * zi;
+                            iter++;
+                        }
+                    }
+
+                    const pIdx = (py * chunkWidth + px) * 4;
+                    if (iter === maxIter) {
+                        buffer[pIdx] = 0;
+                        buffer[pIdx+1] = 0;
+                        buffer[pIdx+2] = 0;
+                        buffer[pIdx+3] = 255;
+                    } else {
+                        let smoothIter = iter;
+                        if (mode === 'standard' && coloringMode === 'smooth') {
+                            const log_zn = Math.log(zr2 + zi2) / 2;
+                            const nu = Math.log(log_zn / Math.log(2)) / Math.log(2);
+                            smoothIter = iter + 1 - nu;
+                        }
+                        
+                        let t_scaled = (smoothIter / maxIter) * colorDensity;
+                        let r, g, b;
+                        const offsetNorm = colorOffset / 360;
+                        
+                        if (palette === 'electric') {
+                            const h = (Math.sqrt(t_scaled) + offsetNorm) % 1;
+                            [r, g, b] = hslToRgb(h, 0.8, 0.5);
+                        } else if (palette === 'fire') {
+                            const val = (smoothIter * colorDensity % 256) / 255;
+                            r = 255 * val;
+                            g = 200 * val * val;
+                            b = 50 * val * val * val;
+                        } else if (palette === 'bw') {
+                            const val = (Math.floor(smoothIter * colorDensity) % 2) === 0 ? 0 : 255;
+                            r=g=b=val;
+                        } else if (palette === 'gold') {
+                            const h = (t_scaled * 10 + offsetNorm) % 1; 
+                            [r, g, b] = hslToRgb(h, 1, 0.3 + 0.4*Math.sin(smoothIter));
+                        } else {
+                             const h = (t_scaled * 3 + offsetNorm) % 1;
+                             [r, g, b] = hslToRgb(h, 0.8, 0.6);
+                        }
+
+                        buffer[pIdx] = r;
+                        buffer[pIdx+1] = g;
+                        buffer[pIdx+2] = b;
+                        buffer[pIdx+3] = 255;
+                    }
+                }
+            }
+
+            self.postMessage({
+                jobId,
+                renderId,
+                buffer: buffer,
+                startX,
+                startY,
+                width: chunkWidth,
+                height: chunkHeight
+            }, [buffer.buffer]);
+        };
+    </script>
+
+    <script>
+        /**
+         * APPLICATION STATE & CONFIG
+         */
+        const AppState = {
+            width: 0,
+            height: 0,
+            cx: -0.5,
+            cy: 0,
+            scale: 0.004,
+            fpCx: 0n, 
+            fpCy: 0n,
+            fpScale: 0n,
+            maxIter: 500,
+            workers: navigator.hardwareConcurrency || 4,
+            precisionMode: 'standard',
+            renderStrategy: 'interlaced',
+            clearMode: 'black',
+            palette: 'electric',
+            colorOffset: 0,
+            coloringMode: 'smooth',
+            colorDensity: 1.0,
+            isDragging: false,
+            lastMouseX: 0,
+            lastMouseY: 0,
+            pendingRender: null,
+            startTime: 0,
+            currentRenderId: 0,
+            // Touch state
+            touchDistance: 0,
+            isPinching: false
+        };
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        
+        const FP_SHIFT = 96n;
+        const FP_ONE = 1n << FP_SHIFT;
+        
+        AppState.fpCx = BigInt(Math.floor(-0.5 * Number(FP_ONE)));
+        AppState.fpCy = 0n;
+        AppState.fpScale = BigInt(Math.floor(0.004 * Number(FP_ONE)));
+
+        let workers = [];
+        let workerBlobURL = null;
+
+        /**
+         * INITIALIZATION
+         */
+        function init() {
+            const workerScript = document.getElementById('worker-source').textContent;
+            const blob = new Blob([workerScript], { type: 'application/javascript' });
+            workerBlobURL = URL.createObjectURL(blob);
+
+            resize();
+            // Handle resize debounce slightly
+            let resizeTimer;
+            window.addEventListener('resize', () => {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(() => {
+                    resize();
+                    requestRender(200);
+                }, 100);
+            });
+
+            setupUI();
+            setupInteractions();
+            
+            requestRender(0);
+        }
+
+        function resize() {
+            // Determine dimensions based on layout
+            const isPortraitMobile = window.innerWidth < 769 && window.innerHeight > window.innerWidth;
+            
+            if (isPortraitMobile) {
+                // In mobile portrait, canvas is top 65% of screen
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight * 0.65;
+            } else {
+                // Desktop or Landscape: Full screen
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+
+            AppState.width = canvas.width;
+            AppState.height = canvas.height;
+        }
+
+        function createWorkers(count) {
+            workers.forEach(w => w.terminate());
+            workers = [];
+
+            for (let i = 0; i < count; i++) {
+                const w = new Worker(workerBlobURL);
+                w.onmessage = handleWorkerMessage;
+                workers.push(w);
+            }
+        }
+
+        /**
+         * RENDER LOGIC
+         */
+        function requestRender(delay = 500) {
+            document.getElementById('loader').classList.add('active');
+            
+            if (AppState.pendingRender) clearTimeout(AppState.pendingRender);
+            
+            AppState.pendingRender = setTimeout(() => {
+                startRender();
+            }, delay);
+        }
+
+        function startRender() {
+            AppState.currentRenderId++;
+            const currentRenderId = AppState.currentRenderId;
+
+            if (workers.length !== parseInt(AppState.workers)) {
+                createWorkers(parseInt(AppState.workers));
+            }
+
+            AppState.startTime = performance.now();
+
+            if (AppState.clearMode === 'black') {
+                ctx.fillStyle = '#0f1115';
+                ctx.fillRect(0, 0, AppState.width, AppState.height);
+            }
+
+            const chunks = generateChunks();
+            let chunksCompleted = 0;
+            const totalChunks = chunks.length;
+
+            chunks.forEach((chunk, index) => {
+                const worker = workers[index % workers.length];
+                
+                const msg = {
+                    jobId: index,
+                    renderId: currentRenderId,
+                    mode: AppState.precisionMode,
+                    width: AppState.width,
+                    height: AppState.height,
+                    startX: chunk.x,
+                    startY: chunk.y,
+                    chunkWidth: chunk.w,
+                    chunkHeight: chunk.h,
+                    maxIter: AppState.maxIter,
+                    palette: AppState.palette,
+                    colorOffset: parseInt(AppState.colorOffset),
+                    coloringMode: AppState.coloringMode,
+                    colorDensity: parseFloat(AppState.colorDensity),
+                    cx: AppState.cx,
+                    cy: AppState.cy,
+                    scale: AppState.scale,
+                    cxStr: AppState.fpCx.toString(),
+                    cyStr: AppState.fpCy.toString(),
+                    scaleStr: AppState.fpScale.toString()
+                };
+
+                worker.postMessage(msg);
+            });
+            
+            AppState.chunksTotal = totalChunks;
+            AppState.chunksDone = 0;
+        }
+
+        function generateChunks() {
+            const w = AppState.width;
+            const h = AppState.height;
+            const strategy = AppState.renderStrategy;
+            const chunks = [];
+
+            if (strategy === 'scanline') {
+                for (let y = 0; y < h; y++) {
+                    chunks.push({ x: 0, y: y, w: w, h: 1 });
+                }
+            } else if (strategy === 'chunks') {
+                const tileSize = 128;
+                for (let y = 0; y < h; y += tileSize) {
+                    for (let x = 0; x < w; x += tileSize) {
+                        chunks.push({
+                            x: x, y: y,
+                            w: Math.min(tileSize, w - x),
+                            h: Math.min(tileSize, h - y)
+                        });
+                    }
+                }
+                // Shuffle
+                for (let i = chunks.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [chunks[i], chunks[j]] = [chunks[j], chunks[i]];
+                }
+            } else {
+                // Interlaced (Default)
+                const renderedRows = new Set();
+                let step = 32;
+                while (step >= 1) {
+                    for (let y = 0; y < h; y += step) {
+                        if (!renderedRows.has(y)) {
+                            chunks.push({ x: 0, y: y, w: w, h: 1 });
+                            renderedRows.add(y);
+                        }
+                    }
+                    step = Math.floor(step / 2);
+                }
+            }
+            return chunks;
+        }
+
+        function handleWorkerMessage(e) {
+            const { renderId, buffer, startX, startY, width, height } = e.data;
+            if (renderId !== AppState.currentRenderId) return; 
+
+            const imgData = new ImageData(buffer, width, height);
+            ctx.putImageData(imgData, startX, startY);
+
+            AppState.chunksDone++;
+            if (AppState.chunksDone >= AppState.chunksTotal) {
+                if (renderId === AppState.currentRenderId) renderComplete();
+            }
+        }
+
+        function renderComplete() {
+            const duration = performance.now() - AppState.startTime;
+            document.getElementById('time-stat').innerText = `Time: ${duration.toFixed(0)}ms`;
+            document.getElementById('loader').classList.remove('active');
+        }
+
+        /**
+         * INTERACTION & ZOOM
+         */
+        function updateStats() {
+            let cx, cy, zm;
+            if (AppState.precisionMode === 'high') {
+                const s = Number(AppState.fpScale) / Number(FP_ONE);
+                cx = (Number(AppState.fpCx) / Number(FP_ONE)).toExponential(4);
+                cy = (Number(AppState.fpCy) / Number(FP_ONE)).toExponential(4);
+                zm = (1 / s).toExponential(2);
+            } else {
+                cx = AppState.cx.toFixed(8);
+                cy = AppState.cy.toFixed(8);
+                zm = (1 / AppState.scale).toExponential(2);
+            }
+            
+            document.getElementById('coords-stat').innerText = `X: ${cx}, Y: ${cy}`;
+            document.getElementById('zoom-stat').innerText = `Zoom: ${zm}x`;
+        }
+
+        function setupInteractions() {
+            // MOUSE EVENTS
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
+                applyZoom(zoomFactor, e.clientX, e.clientY);
+                requestRender(AppState.precisionMode === 'high' ? 400 : 200); 
+            }, { passive: false });
+
+            canvas.addEventListener('mousedown', (e) => {
+                AppState.isDragging = true;
+                AppState.lastMouseX = e.clientX;
+                AppState.lastMouseY = e.clientY;
+                canvas.style.cursor = 'grabbing';
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (AppState.isDragging) {
+                    AppState.isDragging = false;
+                    canvas.style.cursor = 'default';
+                    requestRender(AppState.precisionMode === 'high' ? 300 : 100);
+                }
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!AppState.isDragging) return;
+                const dx = e.clientX - AppState.lastMouseX;
+                const dy = e.clientY - AppState.lastMouseY;
+                AppState.lastMouseX = e.clientX;
+                AppState.lastMouseY = e.clientY;
+                applyPan(dx, dy);
+                requestRender(AppState.precisionMode === 'high' ? 500 : 150);
+            });
+
+            // TOUCH EVENTS
+            canvas.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    AppState.isDragging = true;
+                    AppState.isPinching = false;
+                    AppState.lastMouseX = e.touches[0].clientX;
+                    AppState.lastMouseY = e.touches[0].clientY;
+                } else if (e.touches.length === 2) {
+                    AppState.isDragging = false;
+                    AppState.isPinching = true;
+                    AppState.touchDistance = getTouchDistance(e.touches);
+                }
+            }, { passive: false });
+
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault(); // Prevent page scrolling
+                
+                if (AppState.isPinching && e.touches.length === 2) {
+                    const newDist = getTouchDistance(e.touches);
+                    const scaleFactor = AppState.touchDistance / newDist; // Inverse because distance shrinking = zoom out
+                    
+                    // Center of zoom is midpoint between fingers
+                    const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                    const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+
+                    applyZoom(scaleFactor, midX, midY);
+                    
+                    AppState.touchDistance = newDist;
+                    requestRender(200);
+
+                } else if (AppState.isDragging && e.touches.length === 1) {
+                    const dx = e.touches[0].clientX - AppState.lastMouseX;
+                    const dy = e.touches[0].clientY - AppState.lastMouseY;
+                    AppState.lastMouseX = e.touches[0].clientX;
+                    AppState.lastMouseY = e.touches[0].clientY;
+                    applyPan(dx, dy);
+                    requestRender(200);
+                }
+            }, { passive: false });
+
+            canvas.addEventListener('touchend', (e) => {
+                AppState.isDragging = false;
+                AppState.isPinching = false;
+                requestRender(100);
+            });
+        }
+
+        function getTouchDistance(touches) {
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function applyZoom(factor, mouseX, mouseY) {
+            // Note: Canvas might be offset in mobile mode, but since it's at top:0 left:0 usually, clientX works.
+            // If we move canvas, we should use getBoundingClientRect().
+            const rect = canvas.getBoundingClientRect();
+            const relX = mouseX - rect.left;
+            const relY = mouseY - rect.top;
+
+            if (AppState.precisionMode === 'high') {
+                const s = AppState.fpScale;
+                const mX = BigInt(Math.floor(relX - AppState.width/2));
+                const mY = BigInt(Math.floor(relY - AppState.height/2));
+                const wx = AppState.fpCx + mX * s;
+                const wy = AppState.fpCy + mY * s;
+                
+                // Using BigInt for zoom factor
+                const numFactor = BigInt(Math.floor(factor * 1000));
+                const denFactor = 1000n;
+                const newScale = (s * numFactor) / denFactor;
+
+                AppState.fpCx = wx - mX * newScale;
+                AppState.fpCy = wy - mY * newScale;
+                AppState.fpScale = newScale;
+            } else {
+                const s = AppState.scale;
+                const mX = relX - AppState.width/2;
+                const mY = relY - AppState.height/2;
+                const wx = AppState.cx + mX * s;
+                const wy = AppState.cy + mY * s;
+                const newScale = s * factor;
+                AppState.cx = wx - mX * newScale;
+                AppState.cy = wy - mY * newScale;
+                AppState.scale = newScale;
+            }
+            updateStats();
+        }
+
+        function applyPan(dx, dy) {
+            if (AppState.precisionMode === 'high') {
+                const bDx = BigInt(Math.floor(dx));
+                const bDy = BigInt(Math.floor(dy));
+                AppState.fpCx -= bDx * AppState.fpScale;
+                AppState.fpCy -= bDy * AppState.fpScale;
+            } else {
+                AppState.cx -= dx * AppState.scale;
+                AppState.cy -= dy * AppState.scale;
+            }
+            updateStats();
+        }
+
+        /**
+         * UI BINDINGS
+         */
+        function setupUI() {
+            const ui = document.getElementById('ui-layer');
+            const toggle = document.getElementById('toggle-ui');
+            toggle.addEventListener('click', () => {
+                ui.classList.toggle('collapsed');
+                toggle.innerText = ui.classList.contains('collapsed') ? 'Show UI' : 'Hide UI';
+            });
+
+            document.getElementById('worker-count').value = AppState.workers;
+            document.getElementById('render-btn').addEventListener('click', () => requestRender(0));
+            
+            document.getElementById('worker-count').addEventListener('change', (e) => {
+                AppState.workers = parseInt(e.target.value);
+                createWorkers(AppState.workers);
+            });
+
+            document.getElementById('iterations').addEventListener('change', (e) => {
+                AppState.maxIter = parseInt(e.target.value);
+                requestRender(100);
+            });
+
+            document.getElementById('precision-mode').addEventListener('change', (e) => {
+                AppState.precisionMode = e.target.value;
+                if (AppState.precisionMode === 'high') {
+                    AppState.fpCx = BigInt(Math.floor(AppState.cx * Number(FP_ONE)));
+                    AppState.fpCy = BigInt(Math.floor(AppState.cy * Number(FP_ONE)));
+                    AppState.fpScale = BigInt(Math.floor(AppState.scale * Number(FP_ONE)));
+                } else {
+                    AppState.cx = Number(AppState.fpCx) / Number(FP_ONE);
+                    AppState.cy = Number(AppState.fpCy) / Number(FP_ONE);
+                    AppState.scale = Number(AppState.fpScale) / Number(FP_ONE);
+                }
+                updateStats();
+                requestRender(0);
+            });
+
+            document.getElementById('render-strategy').addEventListener('change', (e) => {
+                AppState.renderStrategy = e.target.value;
+                requestRender(0);
+            });
+            
+            document.getElementById('clear-mode').addEventListener('change', (e) => {
+                AppState.clearMode = e.target.value;
+                requestRender(0);
+            });
+
+            document.getElementById('palette').addEventListener('change', (e) => {
+                AppState.palette = e.target.value;
+                requestRender(100);
+            });
+            
+            document.getElementById('coloring-mode').addEventListener('change', (e) => {
+                AppState.coloringMode = e.target.value;
+                requestRender(100);
+            });
+
+            document.getElementById('color-density').addEventListener('input', (e) => {
+                AppState.colorDensity = e.target.value;
+                requestRender(50);
+            });
+
+            document.getElementById('color-offset').addEventListener('input', (e) => {
+                AppState.colorOffset = e.target.value;
+                requestRender(50);
+            });
+            
+            document.getElementById('reset-btn').addEventListener('click', () => {
+                AppState.cx = -0.5;
+                AppState.cy = 0;
+                AppState.scale = 0.004;
+                AppState.fpCx = BigInt(Math.floor(-0.5 * Number(FP_ONE)));
+                AppState.fpCy = 0n;
+                AppState.fpScale = BigInt(Math.floor(0.004 * Number(FP_ONE)));
+                updateStats();
+                requestRender(0);
+            });
+        }
+
+        init();
+    </script>
+</body>
+</html>
